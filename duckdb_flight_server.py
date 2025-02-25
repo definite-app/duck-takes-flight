@@ -11,19 +11,21 @@ class DuckDBFlightServer(flight.FlightServerBase):
 
     def do_get(self, context, ticket):
         """Handle 'GET' requests from clients to retrieve data."""
+        cur = self.conn.cursor()
         query = ticket.ticket.decode("utf-8")
-        result_table = self.conn.execute(query).fetch_arrow_table()
+        result_table = cur.execute(query).fetch_arrow_table()
         # Convert to record batches with alignment
         batches = result_table.to_batches(max_chunksize=1024)  # Use power of 2 for alignment
         return flight.RecordBatchStream(pa.Table.from_batches(batches))
 
     def do_put(self, context, descriptor, reader, writer):
         """Handle 'PUT' requests to upload data to the DuckDB instance."""
+        cur = self.conn.cursor()
         table = reader.read_all()
         table_name = descriptor.path[0].decode('utf-8')
         
         # Create table if it doesn't exist
-        self.conn.execute(f"""
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
                 batch_id BIGINT,
                 timestamp VARCHAR,
@@ -35,16 +37,17 @@ class DuckDBFlightServer(flight.FlightServerBase):
         # Convert to record batches for better alignment
         batches = table.to_batches(max_chunksize=1024)
         aligned_table = pa.Table.from_batches(batches)
-        self.conn.register("temp_table", aligned_table)
+        cur.register("temp_table", aligned_table)
         
         # Insert new data
-        self.conn.execute(f"INSERT INTO {table_name} SELECT * FROM temp_table")
+        cur.execute(f"INSERT INTO {table_name} SELECT * FROM temp_table")
 
     def do_action(self, context, action):
         """Handle custom actions like executing SQL queries."""
+        cur = self.conn.cursor()
         if action.type == "query":
             query = action.body.to_pybytes().decode("utf-8")
-            self.conn.execute(query)
+            cur.execute(query)
             return []
         else:
             raise NotImplementedError(f"Unknown action type: {action.type}")
