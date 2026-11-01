@@ -1,3 +1,5 @@
+import re
+
 import duckdb
 import pyarrow as pa
 import pyarrow.flight as flight
@@ -20,7 +22,11 @@ class DuckDBFlightServer(flight.FlightServerBase):
     def do_put(self, context, descriptor, reader, writer):
         """Handle 'PUT' requests to upload data to the DuckDB instance."""
         table = reader.read_all()
+        if not descriptor.path:
+            raise ValueError("Missing table name in descriptor")
         table_name = descriptor.path[0].decode('utf-8')
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
+            raise ValueError(f"Invalid table name: {table_name}")
         
         # Create table if it doesn't exist
         self.conn.execute(f"""
